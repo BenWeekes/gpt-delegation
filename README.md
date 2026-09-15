@@ -2,7 +2,7 @@
 
 A working recipe for a voice agent that **stays responsive while a second model thinks**.
 
-Four things at once:
+Five things at once:
 
 1. **Full-duplex speech** — the front model talks and listens at the same time, so it can
    backchannel ("mm-hm") while you are still speaking.
@@ -11,6 +11,9 @@ Four things at once:
 3. **A genuinely slow tool over MCP** — several real API calls, taking seconds.
 4. **A verifiable action** — the agent writes your choice to disk, so you can check it
    actually happened rather than trusting the transcript.
+5. **A talking avatar** — a face that keeps animating through the slow tool call instead of
+   freezing. An avatar is the harshest test of the whole idea: it consumes the audio stream
+   continuously, so any gap or premature end-of-turn is immediately visible.
 
 Built on [Agora convoAI](https://docs.agora.io/en/conversational-ai/overview/product-overview)
 with OpenAI's GPT Live.
@@ -30,6 +33,9 @@ Work in progress. Nothing here is finished yet.
 | it compares them and recommends one | actual reasoning, not a lookup |
 | "book Lisbon" — then "actually, Seville" | a correction mid-task |
 | `save_trip` writes `output/<id>.json` | a file you can `cat` |
+
+Then the same conversation again with an avatar attached, which is where premature turn
+endings and audio gaps become obvious.
 
 The weather API is [Open-Meteo](https://open-meteo.com/), which needs **no API key**. That is
 deliberate: you can run this recipe without signing up for anything.
@@ -57,12 +63,14 @@ These are the tests, not decoration. Each one is a real failure mode:
   one file in `output/`, containing Seville — no stale Lisbon file left behind.
 - **The conversation stays live during the wait.** You should hear something while the tool
   runs, not silence.
+- **With an avatar, the face does not stop and restart** part-way through an answer, and no
+  audio is dropped.
 
 ## Layout
 
 ```
-mcp-server/     the MCP server: get_forecast + save_trip
-output/         where save_trip writes; gitignored, safe to delete
+mcp-server/     the MCP server: get_forecast + save_trip   (not written yet)
+output/         where save_trip writes; gitignored, created on first run
 ```
 
 `save_trip` writes to `output/` in this repo by default, so you can inspect what the agent
