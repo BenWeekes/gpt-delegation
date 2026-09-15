@@ -1,0 +1,6 @@
+trips/
+__pycache__/
+.env
+*.pyc
+.venv/
+INTERNAL.md
