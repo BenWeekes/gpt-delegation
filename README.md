@@ -73,6 +73,10 @@ mcp-server/     the MCP server: get_forecast + save_trip   (not written yet)
 output/         where save_trip writes; gitignored, created on first run
 ```
 
+All the code for the demo lives here. The setup guide below covers running the MCP server and
+the agent configuration to use it — the join request is included with every credential
+replaced by an obvious placeholder.
+
 `save_trip` writes to `output/` in this repo by default, so you can inspect what the agent
 actually did. Override with the `OUTPUT_DIR` environment variable if you want it elsewhere.
 
