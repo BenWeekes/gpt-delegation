@@ -29,7 +29,7 @@ Work in progress. Nothing here is finished yet.
 | the backend model picks candidate cities and calls `get_forecast` for each | several real API calls, a few seconds |
 | it compares them and recommends one | actual reasoning, not a lookup |
 | "book Lisbon" — then "actually, Seville" | a correction mid-task |
-| `save_trip` writes `trips/<id>.json` | a file you can `cat` |
+| `save_trip` writes `output/<id>.json` | a file you can `cat` |
 
 The weather API is [Open-Meteo](https://open-meteo.com/), which needs **no API key**. That is
 deliberate: you can run this recipe without signing up for anything.
@@ -54,7 +54,7 @@ These are the tests, not decoration. Each one is a real failure mode:
 - **It does not re-delegate to repeat itself.** Ask "what did you say again?" and there should
   be zero new tool calls.
 - **A correction leaves one file, not two.** After "actually, Seville" there must be exactly
-  one trip file, containing Seville — no stale Lisbon file left behind.
+  one file in `output/`, containing Seville — no stale Lisbon file left behind.
 - **The conversation stays live during the wait.** You should hear something while the tool
   runs, not silence.
 
@@ -62,7 +62,11 @@ These are the tests, not decoration. Each one is a real failure mode:
 
 ```
 mcp-server/     the MCP server: get_forecast + save_trip
+output/         where save_trip writes; gitignored, safe to delete
 ```
+
+`save_trip` writes to `output/` in this repo by default, so you can inspect what the agent
+actually did. Override with the `OUTPUT_DIR` environment variable if you want it elsewhere.
 
 More to come: the agent configuration, and a walkthrough.
 
