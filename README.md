@@ -16,11 +16,12 @@ Five things at once:
    continuously, so any gap or premature end-of-turn is immediately visible.
 
 Built on [Agora convoAI](https://docs.agora.io/en/conversational-ai/overview/product-overview)
-with OpenAI's GPT Live.
+with OpenAI's GPT Live. The front model runs full-duplex; a Responses model does the reasoning
+and drives the tools; the tools are served over MCP by the small server in this repo.
 
-## Status
-
-Work in progress. Nothing here is finished yet.
+For the architecture, how the agent stays responsive, how each claim was verified, and what the
+latency looks like, see the **[walkthrough](docs/walkthrough.md)**. This README is the setup
+guide.
 
 ## The scenario
 
@@ -55,32 +56,157 @@ one tool and the rest is unchanged.
 These are the tests, not decoration. Each one is a real failure mode:
 
 - **It does not guess while waiting.** No temperature, recommendation or confirmation is
-  spoken before the tool actually returns. This is the failure the whole pattern exists to
-  prevent, and it looks fine in a demo until someone checks the numbers were real.
-- **It does not re-delegate to repeat itself.** Ask "what did you say again?" and there should
-  be zero new tool calls.
-- **A correction leaves one file, not two.** After "actually, Seville" there must be exactly
-  one file in `output/`, containing Seville — no stale Lisbon file left behind.
-- **The conversation stays live during the wait.** You should hear something while the tool
-  runs, not silence.
+  spoken before the tool actually returns. The agent says a short filler while `get_forecast`
+  runs and speaks the numbers only once they are back.
+- **It does not re-delegate to repeat itself.** Ask "what did you say again?" and there are
+  zero new tool calls — it repeats from memory.
+- **A correction leaves one file, not two.** After "actually, Seville" there is exactly one
+  file in `output/`, containing Seville. `save_trip` reuses the trip id.
+- **The conversation stays live during the wait.** You hear something while the tool runs, not
+  silence.
 - **With an avatar, the face does not stop and restart** part-way through an answer, and no
   audio is dropped.
 
 ## Layout
 
 ```
-mcp-server/     the MCP server: get_forecast + save_trip   (not written yet)
-output/         where save_trip writes; gitignored, created on first run
+mcp-server/
+  server.py         the MCP server: get_forecast + save_trip
+  requirements.txt
+output/             where save_trip writes; gitignored, created on first run
 ```
 
-All the code for the demo lives here. The setup guide below covers running the MCP server and
-the agent configuration to use it — the join request is included with every credential
-replaced by an obvious placeholder.
+## Run the MCP server
 
-`save_trip` writes to `output/` in this repo by default, so you can inspect what the agent
-actually did. Override with the `OUTPUT_DIR` environment variable if you want it elsewhere.
+Python 3.10+.
 
-More to come: the agent configuration, and a walkthrough.
+```bash
+cd mcp-server
+pip install -r requirements.txt
+python server.py            # binds 0.0.0.0:8787, MCP endpoint at /mcp
+```
+
+Environment:
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `PORT` | `8787` | Listen port. |
+| `OUTPUT_DIR` | `../output` | Where `save_trip` writes. |
+
+The convoAI agent connects to this server over the network, so run it on a host the agent can
+reach, bind it to `0.0.0.0` (the default here), and use that host's address in the join request
+below. `save_trip` writes to `output/` next to the server, so you can inspect what the agent
+actually did.
+
+The two tools:
+
+- **`get_forecast(cities)`** — pass all candidate cities in one call. Returns Saturday's and
+  Sunday's sky, max temperature, rain chance and sunshine hours for each, from Open-Meteo. It
+  makes two live requests per city, so it takes a few seconds. That delay is the point of the
+  recipe, not a bug to hide.
+- **`save_trip(city, country, reason, trip_id)`** — records the chosen destination as
+  `output/<trip_id>.json`. Call it again with the same `trip_id` to replace an earlier choice,
+  so a correction leaves exactly one file.
+
+## The join request
+
+POST this to the convoAI agent endpoint. **Every credential and endpoint is a placeholder** —
+replace the `<…>` and `OBFUSCATED` values with your own. `save_trip` and delegation need no
+extra credentials; the only keys are your OpenAI key (GPT Live and the backend model are on the
+same key) and, if you attach one, the avatar vendor's.
+
+```
+POST https://api.agora.io/api/conversational-ai-agent/v2/projects/<app-id>/join
+Header: Authorization: agora token=<token>
+```
+
+```json
+{
+  "name": "agent-<channel>",
+  "properties": {
+    "channel": "<channel>",
+    "token": "<rtc-token>",
+    "agent_rtc_uid": "12345",
+    "remote_rtc_uids": ["*"],
+    "enable_string_uid": false,
+    "idle_timeout": 120,
+    "silence_timeout": 60,
+    "parameters": { "data_channel": "rtm" },
+    "advanced_features": {
+      "enable_mllm": true,
+      "enable_rtm": true,
+      "enable_tools": true
+    },
+    "agent_rtm_uid": "agent_rtm",
+    "rtm_token": "<rtm-token>",
+    "mllm": {
+      "enable": true,
+      "vendor": "openai_gpt_live",
+      "api_key": "sk-...OBFUSCATED...",
+      "url": "wss://api.openai.com/v1/live/sessions",
+      "greeting_message": "Hi! I'm GPT Live, running on Agora. Tell me what kind of weather you're after this weekend and I'll pick your getaway.",
+      "params": {
+        "voice": "cedar",
+        "prompt": "<front-model instructions>",
+        "delegation": "responses",
+        "responses_model": "gpt-6-astra",
+        "responses_params": {
+          "instructions": "<backend-model instructions>"
+        },
+        "output_idle_end_ms": 1500,
+        "output_buffer_ms": -1,
+        "mcp_servers": [
+          {
+            "name": "trip-planner",
+            "endpoint": "http://<MCP_HOST>:8787/mcp",
+            "transport": "streamable_http",
+            "timeout_ms": 30000
+          }
+        ]
+      }
+    },
+    "avatar": {
+      "enable": true,
+      "vendor": "generic",
+      "params": {
+        "agora_appid": "<agora-app-id>",
+        "agora_channel": "<channel>",
+        "agora_token": "<avatar-rtc-token>",
+        "agora_uid": "102",
+        "api_base_url": "https://lemonslice.com/api/liveai/agora",
+        "api_key": "<lemonslice-api-key>",
+        "avatar_id": "<lemonslice-avatar-id>",
+        "aspect_ratio": "1x1",
+        "quality": "high",
+        "version": "v1",
+        "video_encoding": "H264"
+      }
+    }
+  }
+}
+```
+
+What the fields do:
+
+- **`mllm.vendor: "openai_gpt_live"`** selects the full-duplex GPT Live front model. There is
+  no `asr`, `llm` or `tts` node: the model does speech-to-speech itself.
+- **`delegation: "responses"` + `responses_model`** send the reasoning and tool work to a
+  separate Responses model. Prompt it through `responses_params.instructions`, separately from
+  the front model's `prompt`. The front model keeps the conversation alive while it thinks.
+- **`mcp_servers`** points at the server you started above. The transport spelling is
+  `streamable_http` (underscore). `enable_tools` must be on, or the delegate has no tools.
+- **`output_idle_end_ms`** ends the assistant's turn after 1.5 s of output silence, which keeps
+  an avatar animating smoothly instead of stopping and restarting between clauses.
+  **`output_buffer_ms`** is an arrival cushion: `-1` (the default here) disables it for the lowest first-audio latency, at the cost of occasional crackle if the provider's delivery jitters; raise it (for example to `1500`) for the smoothest avatar at higher latency.
+- **`avatar`** is optional — drop the whole block for a voice-only agent. This one is LemonSlice
+  through the generic avatar vendor, which wants the 24 kHz audio GPT Live emits by default.
+
+### Checking that reasoning is really delegated
+
+It is easy to build something that looks delegated but silently answers from the front model.
+To prove it, set `responses_model` to a name that does not exist. If delegation is truly wired,
+the agent visibly fails to answer instead of quietly falling back. Put the real model back and
+the behaviour returns.
 
 ## Licence
 
